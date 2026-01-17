@@ -4,10 +4,9 @@ import os
 os.environ["OTEL_SDK_DISABLED"] = "true"
 os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
 
-# 🔑 THE UNIVERSAL BYPASS
-# This stops CrewAI from asking for an OpenAI key during setup
+# 🔑 THE UNIVERSAL BYPASS (Avoids OpenAI Key requirement)
 if "OPENAI_API_KEY" not in os.environ:
-    os.environ["OPENAI_API_KEY"] = "sk-bypass-key-not-needed"
+    os.environ["OPENAI_API_KEY"] = "sk-bypass"
 
 import streamlit as st
 import sqlite3
@@ -22,19 +21,18 @@ from crewai_tools import SerperDevTool
 st.set_page_config(page_title="Sovereign Global AI", layout="wide", page_icon="👑")
 
 try:
-    API_KEY = st.secrets["GOOGLE_API_KEY"]
+    K = st.secrets["GOOGLE_API_KEY"]
     os.environ["SERPER_API_KEY"] = st.secrets["SERPER_API_KEY"]
 except KeyError:
     st.error("⚠️ API Keys Missing in Secrets.")
     st.stop()
 
-# 🌎 NATIVE GOOGLE ENGINE (2026 Stable)
-# Using direct Gemini 3 Flash to avoid 404 errors
+# 🌎 NATIVE GOOGLE ENGINE
+# We use gemini-1.5-flash as the standard stable model
 global_llm = LLM(
-    model="gemini-3-flash", 
-    api_key=API_KEY,
-    temperature=0.3,
-    max_rpm=5
+    model="gemini/gemini-1.5-flash", 
+    api_key=K,
+    temperature=0.3
 )
 
 # ==================== DATABASE ENGINE ====================
@@ -56,8 +54,8 @@ init_db()
 def run_global_ai(data, directive):
     researcher = Agent(
         role="Local Scout",
-        goal=f"Research costs in {data['location']}",
-        backstory="Local production expert.",
+        goal=f"Research 2026 specifics in {data['location']}",
+        backstory="Expert in local vendor pricing.",
         tools=[SerperDevTool()],
         llm=global_llm,
         verbose=True
@@ -65,27 +63,33 @@ def run_global_ai(data, directive):
     
     planner = Agent(
         role="Executive Producer",
-        goal="Create a JSON budget report",
+        goal="Create a JSON budget and risk report",
         backstory="Strategic financial lead.",
         llm=global_llm,
         verbose=True
     )
 
     t1 = Task(
-        description=f"Research rates in {data['location']} for: {directive}",
-        expected_output="A list of local vendors and costs.",
+        description=f"Research 2026 rates in {data['location']} for: {directive}",
+        expected_output="A list of costs and vendors.",
         agent=researcher
     )
     
     t2 = Task(
-        description="Format as JSON. Use keys: 'crew' (role, name, rate), 'equipment', 'schedule'.",
+        description="Format as JSON. Keys: 'crew' (role, name, rate), 'equipment', 'schedule'.",
         expected_output="Return ONLY a JSON object.",
         agent=planner,
         context=[t1]
     )
 
-    # memory=False is critical to avoid hidden OpenAI embedding calls
-    crew = Crew(agents=[researcher, planner], tasks=[t1, t2], memory=False)
+    # ✅ THE FIX: max_rpm is moved here to the Crew level
+    # This paces the entire operation to stay under your 10 RPM Google limit
+    crew = Crew(
+        agents=[researcher, planner], 
+        tasks=[t1, t2], 
+        max_rpm=2, 
+        memory=False
+    )
     return str(crew.kickoff())
 
 # ==================== USER INTERFACE ====================
@@ -143,7 +147,7 @@ elif page == "New Global Project":
                         status.update(label="✅ Success!", state="complete")
                         st.balloons()
                     else:
-                        st.error("AI results received but formatting was invalid.")
+                        st.error("AI completed but data format was invalid.")
                         st.write(result)
                 except Exception as e:
                     st.error(f"Error: {e}")
