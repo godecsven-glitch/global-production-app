@@ -2,9 +2,10 @@ streamlit
 pandas
 crewai
 crewai-tools
+langchain-google-genai
 google-generativeai
-litellm
 pysqlite3-binary
+
 
 
 
