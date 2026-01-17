@@ -1,7 +1,13 @@
+import os
+
+# 🛡️ THE SAFETY SWITCHES (Must be at the very top)
+os.environ["OTEL_SDK_DISABLED"] = "true"
+os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
+os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
+
 import streamlit as st
 import sqlite3
 import json
-import os
 import re
 import uuid
 import pandas as pd
@@ -12,12 +18,12 @@ from crewai_tools import SerperDevTool
 # ==================== GLOBAL CONFIGURATION ====================
 st.set_page_config(page_title="Sovereign Global AI", layout="wide", page_icon="👑")
 
-# Search for keys in Streamlit Secrets
+# Securely load keys from Streamlit Secrets
 try:
     GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
     SERPER_API_KEY = st.secrets["SERPER_API_KEY"]
-except:
-    st.error("⚠️ API Keys Missing. Please add GOOGLE_API_KEY and SERPER_API_KEY to Streamlit Secrets.")
+except KeyError:
+    st.error("⚠️ **API Keys Missing**: Go to Streamlit Settings -> Secrets and add GOOGLE_API_KEY and SERPER_API_KEY.")
     st.stop()
 
 os.environ["SERPER_API_KEY"] = SERPER_API_KEY
@@ -39,7 +45,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS projects 
                  (id TEXT PRIMARY KEY, name TEXT, location TEXT, type TEXT, budget REAL, plan TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS crew 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT, role TEXT, name TEXT, rate REAL, currency TEXT)''')
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT, role TEXT, name TEXT, rate REAL)''')
     conn.commit()
     conn.close()
 
@@ -51,7 +57,7 @@ def run_global_ai(data, directive):
     researcher = Agent(
         role="Global Production Researcher",
         goal=f"Research 2026 production data for {data['location']}",
-        backstory="Expert in global logistics, local labor laws, and equipment rental markets.",
+        backstory="Expert in global logistics, labor laws, and equipment rental markets.",
         tools=[SerperDevTool()],
         llm=global_llm,
         verbose=True
@@ -66,29 +72,20 @@ def run_global_ai(data, directive):
     )
 
     t1 = Task(
-        description=f"Research local crew rates, equipment vendors, and permit rules in {data['location']} for a {data['type']}.",
+        description=f"Research 2026 crew rates and gear vendors in {data['location']} for a {data['type']}.",
         expected_output="A list of 2026 rates and local vendor names.",
         agent=researcher
     )
     
     t2 = Task(
         description=f"Based on research and this directive: {directive}, create a JSON plan. Budget: {data['budget']}.",
-        expected_output="JSON with keys: 'crew' (list of: role, name, rate), 'equipment', and 'schedule'.",
+        expected_output="Return ONLY a JSON object with keys: 'crew' (list of: role, name, rate), 'equipment', and 'schedule'.",
         agent=planner,
         context=[t1]
     )
 
     crew = Crew(agents=[researcher, planner], tasks=[t1, t2])
-    return crew.kickoff()
-
-def run_stress_test(budget, crew_list):
-    auditor = Agent(role="Risk Auditor", goal="Stress test budgets", backstory="Volatility expert.", llm=global_llm)
-    t = Task(
-        description=f"Test this budget of {budget} against 20% inflation and a 2-day delay. Crew: {crew_list}",
-        expected_output="JSON with 'viability_score' (0-100) and 'risk_notes'.",
-        agent=auditor
-    )
-    return str(Crew(agents=[auditor], tasks=[t]).kickoff())
+    return str(crew.kickoff())
 
 # ==================== USER INTERFACE ====================
 
@@ -106,54 +103,55 @@ if page == "Dashboard":
         st.info("No projects yet. Click 'New Global Project' to start.")
     else:
         st.dataframe(df, use_container_width=True)
-        selected_id = st.selectbox("View Details for Project ID", df['id'])
         
-        if st.button("📊 Load Project Intelligence"):
+        # Details view
+        selected_project_name = st.selectbox("Select Project to View", df['name'])
+        selected_id = df[df['name'] == selected_project_name]['id'].values[0]
+        
+        if st.button("📊 View Project Intelligence"):
             conn = sqlite3.connect('global_production.db')
             crew_df = pd.read_sql_query("SELECT role, name, rate FROM crew WHERE project_id=?", conn, params=(selected_id,))
-            proj_data = pd.read_sql_query("SELECT plan, budget FROM projects WHERE id=?", conn, params=(selected_id,)).iloc[0]
+            proj_row = pd.read_sql_query("SELECT plan FROM projects WHERE id=?", conn, params=(selected_id,)).iloc[0]
             conn.close()
             
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write("### Crew Manifest")
-                st.table(crew_df)
-            with col2:
-                st.write("### 🛡️ AI Stress Test")
-                if st.button("Execute Sensitivity Analysis"):
-                    with st.spinner("Calculating risks..."):
-                        test_res = run_stress_test(proj_data['budget'], crew_df.to_dict('records'))
-                        st.json(test_res)
+            st.write(f"### Crew Manifest: {selected_project_name}")
+            st.table(crew_df)
+            with st.expander("View Full AI Strategy"):
+                st.write(proj_row['plan'])
 
 elif page == "New Global Project":
     st.subheader("➕ Create a Territory-Agnostic Production")
     with st.form("creation_form"):
-        name = st.text_input("Project Name (e.g. Alpha Global Shoot)")
-        loc = st.text_input("Territory / City (Anywhere in the world)")
-        ptype = st.selectbox("Production Type", ["Commercial", "Documentary", "Live Broadcast", "Feature Film"])
-        budget = st.number_input("Total Budget (€/USD)", value=10000)
-        directive = st.text_area("What do you want the AI to plan?")
+        name = st.text_input("Project Name", placeholder="Global Brand Launch")
+        loc = st.text_input("Location", placeholder="London, Tokyo, New York...")
+        ptype = st.selectbox("Production Type", ["Commercial", "Documentary", "Feature Film"])
+        budget = st.number_input("Total Budget (€/USD)", value=15000)
+        directive = st.text_area("What should the AI plan?", placeholder="A 2-day cinematic shoot...")
         
         if st.form_submit_button("🚀 Launch Global AI Team"):
             p_id = str(uuid.uuid4())[:8]
             with st.status("🧠 Agents coordinating across global markets...") as status:
                 result = run_global_ai({'location': loc, 'type': ptype, 'budget': budget}, directive)
                 
-                # Extract JSON
+                # Robust JSON Extraction
                 try:
-                    raw_text = str(result)
-                    match = re.search(r'\{.*\}', raw_text, re.DOTALL)
-                    clean_data = json.loads(match.group())
-                    
-                    conn = sqlite3.connect('global_production.db')
-                    c = conn.cursor()
-                    c.execute("INSERT INTO projects VALUES (?,?,?,?,?,?)", (p_id, name, loc, ptype, budget, raw_text))
-                    for person in clean_data.get('crew', []):
-                        c.execute("INSERT INTO crew (project_id, role, name, rate) VALUES (?,?,?,?)", 
-                                 (p_id, person.get('role'), person.get('name'), person.get('rate', 0)))
-                    conn.commit()
-                    conn.close()
-                    status.update(label="✅ Success! Data synced to Global Database.", state="complete")
-                    st.balloons()
+                    match = re.search(r'\{.*\}', result, re.DOTALL)
+                    if match:
+                        clean_data = json.loads(match.group())
+                        
+                        with sqlite3.connect('global_production.db') as conn:
+                            c = conn.cursor()
+                            c.execute("INSERT INTO projects VALUES (?,?,?,?,?,?)", (p_id, name, loc, ptype, budget, result))
+                            for person in clean_data.get('crew', []):
+                                c.execute("INSERT INTO crew (project_id, role, name, rate) VALUES (?,?,?,?)", 
+                                         (p_id, person.get('role'), person.get('name'), person.get('rate', 0)))
+                            conn.commit()
+                        
+                        status.update(label="✅ Success! Data synced to Global Database.", state="complete")
+                        st.balloons()
+                        st.success("Project Saved! Go to Dashboard to view.")
+                    else:
+                        st.error("AI produced a plan but failed to format the data for the database.")
+                        st.write(result)
                 except Exception as e:
-                    st.error(f"Error parsing AI response: {e}")
+                    st.error(f"Error saving data: {e}")
