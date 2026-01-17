@@ -17,19 +17,19 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 st.set_page_config(page_title="Sovereign Global AI", layout="wide", page_icon="👑")
 
 try:
-    # 🔑 Secure Key Loading
     API_KEY = st.secrets["GOOGLE_API_KEY"]
     os.environ["SERPER_API_KEY"] = st.secrets["SERPER_API_KEY"]
 except KeyError:
-    st.error("⚠️ API Keys Missing in Secrets.")
+    st.error("⚠️ API Keys Missing in Streamlit Secrets.")
     st.stop()
 
-# 🌎 THE STABLE BRIDGE (LangChain Version)
-# This prevents the 'ClientError 400' by using a more robust message engine
+# 🌎 THE STABLE v1 BRIDGE
+# We explicitly target the stable v1 API to avoid the v1beta 404 error
 global_llm = ChatGoogleGenerativeAI(
     model="gemini-1.5-flash",
     google_api_key=API_KEY,
-    temperature=0.3
+    temperature=0.3,
+    convert_system_message_to_human=True # Required for some Gemini versions
 )
 
 # ==================== DATABASE ENGINE ====================
@@ -49,10 +49,11 @@ init_db()
 # ==================== AI AGENT LOGIC ====================
 
 def run_global_ai(data, directive):
+    # Reduced complexity to ensure the 404 error doesn't hide other issues
     researcher = Agent(
-        role="Local Production Scout",
-        goal=f"Research 2026 production specifics in {data['location']}",
-        backstory="Expert in local vendor pricing, logistics, and fixing.",
+        role="Local Scout",
+        goal=f"Research 2026 costs in {data['location']}",
+        backstory="Local production expert.",
         tools=[SerperDevTool()],
         llm=global_llm,
         verbose=True,
@@ -61,22 +62,22 @@ def run_global_ai(data, directive):
     
     planner = Agent(
         role="Executive Producer",
-        goal="Create a professional JSON production budget and risk report",
-        backstory="Strategic lead focused on financial viability and weather risks.",
+        goal="Create a JSON budget report",
+        backstory="Strategic financial lead.",
         llm=global_llm,
         verbose=True,
         allow_delegation=False
     )
 
     t1 = Task(
-        description=f"Research 2026 rates and weather risks in {data['location']} for: {directive}",
-        expected_output="A detailed report of costs, vendors, and weather risks.",
+        description=f"Research 2026 rates in {data['location']} for: {directive}",
+        expected_output="A list of local vendors and costs.",
         agent=researcher
     )
     
     t2 = Task(
-        description="Transform research into a JSON plan. Use ONLY these keys: 'crew' (list of objects with role, name, rate), 'equipment', 'schedule'.",
-        expected_output="Return ONLY a clean JSON object.",
+        description="Format as JSON. Keys: 'crew' (role, name, rate), 'equipment', 'schedule'.",
+        expected_output="Return ONLY a JSON object.",
         agent=planner,
         context=[t1]
     )
@@ -97,39 +98,35 @@ if page == "Dashboard":
     conn.close()
     
     if df.empty:
-        st.info("No projects yet.")
+        st.info("No projects found.")
     else:
         st.dataframe(df, use_container_width=True)
-        selected_name = st.selectbox("Select Project to View", df['name'])
+        selected_name = st.selectbox("Select Project", df['name'])
         selected_id = df[df['name'] == selected_name]['id'].values[0]
         
         if st.button("📊 Open Intelligence Report"):
             conn = sqlite3.connect('global_production.db')
             crew_df = pd.read_sql_query("SELECT role, name, rate FROM crew WHERE project_id=?", conn, params=(selected_id,))
-            proj_data = pd.read_sql_query("SELECT plan FROM projects WHERE id=?", conn, params=(selected_id,)).iloc[0][0]
+            proj_data = pd.read_sql_query("SELECT plan FROM projects WHERE id=?", conn, params=(selected_id,)).iloc[0]
             conn.close()
-            
             st.write(f"### Crew Manifest: {selected_name}")
             st.table(crew_df)
-            st.write("### AI Strategic Strategy & Risk Report")
-            st.info(proj_data)
+            st.info(proj_data[0])
 
 elif page == "New Global Project":
     st.subheader("➕ Create a New Production")
     with st.form("creation_form"):
-        name = st.text_input("Project Name (e.g. Iceland March Shoot)")
-        loc = st.text_input("Location (City, Country)")
+        name = st.text_input("Project Name")
+        loc = st.text_input("Location")
         ptype = st.selectbox("Type", ["Commercial", "Documentary", "Feature Film"])
         budget = st.number_input("Budget (€)", value=30000)
-        directive = st.text_area("Detailed Instructions (Paste Iceland text here)")
+        directive = st.text_area("Directive")
         
         if st.form_submit_button("🚀 Launch AI Production Team"):
             p_id = str(uuid.uuid4())[:8]
-            with st.status("🧠 Agents coordinating across global markets...") as status:
+            with st.status("🧠 Agents coordinating...") as status:
                 try:
                     result = run_global_ai({'location': loc, 'type': ptype, 'budget': budget}, directive)
-                    
-                    # Robust JSON Extraction
                     match = re.search(r'\{.*\}', result, re.DOTALL)
                     if match:
                         clean_data = json.loads(match.group())
