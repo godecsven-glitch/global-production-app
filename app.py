@@ -1,12 +1,13 @@
 import os
 
-# 🛡️ THE SAFETY SWITCHES
+# 🛡️ THE SAFETY SWITCHES (Must be at the very top)
 os.environ["OTEL_SDK_DISABLED"] = "true"
 os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
 
-# 🔑 THE UNIVERSAL BYPASS (Avoids OpenAI Key requirement)
+# 🔑 THE UNIVERSAL BYPASS
+# This stops CrewAI from asking for an OpenAI key during setup
 if "OPENAI_API_KEY" not in os.environ:
-    os.environ["OPENAI_API_KEY"] = "sk-bypass"
+    os.environ["OPENAI_API_KEY"] = "sk-bypass-key-not-needed"
 
 import streamlit as st
 import sqlite3
@@ -14,24 +15,25 @@ import json
 import re
 import uuid
 import pandas as pd
-from crewai import Agent, Task, Crew, LLM
+from crewai import Agent, Task, Crew
 from crewai_tools import SerperDevTool
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 # ==================== GLOBAL CONFIGURATION ====================
 st.set_page_config(page_title="Sovereign Global AI", layout="wide", page_icon="👑")
 
 try:
-    K = st.secrets["GOOGLE_API_KEY"]
+    API_KEY = st.secrets["GOOGLE_API_KEY"]
     os.environ["SERPER_API_KEY"] = st.secrets["SERPER_API_KEY"]
 except KeyError:
-    st.error("⚠️ API Keys Missing in Secrets.")
+    st.error("⚠️ API Keys Missing: Add GOOGLE_API_KEY and SERPER_API_KEY to Streamlit Secrets.")
     st.stop()
 
-# 🌎 NATIVE GOOGLE ENGINE
-# We use gemini-1.5-flash as the standard stable model
-global_llm = LLM(
-    model="gemini/gemini-1.5-flash", 
-    api_key=K,
+# 🌎 THE STABLE BRIDGE (LangChain Version)
+# This bypasses the 'Native Provider' error and the '404 Not Found' error.
+global_llm = ChatGoogleGenerativeAI(
+    model="gemini-1.5-flash",
+    google_api_key=API_KEY,
     temperature=0.3
 )
 
@@ -54,24 +56,26 @@ init_db()
 def run_global_ai(data, directive):
     researcher = Agent(
         role="Local Scout",
-        goal=f"Research 2026 specifics in {data['location']}",
-        backstory="Expert in local vendor pricing.",
+        goal=f"Research 2026 production specifics in {data['location']}",
+        backstory="Expert in local vendor pricing and weather logistics.",
         tools=[SerperDevTool()],
         llm=global_llm,
-        verbose=True
+        verbose=True,
+        allow_delegation=False
     )
     
     planner = Agent(
         role="Executive Producer",
-        goal="Create a JSON budget and risk report",
-        backstory="Strategic financial lead.",
+        goal="Create a professional JSON production budget and risk report",
+        backstory="Strategic lead focused on project viability.",
         llm=global_llm,
-        verbose=True
+        verbose=True,
+        allow_delegation=False
     )
 
     t1 = Task(
-        description=f"Research 2026 rates in {data['location']} for: {directive}",
-        expected_output="A list of costs and vendors.",
+        description=f"Research 2026 rates and weather risks in {data['location']} for: {directive}",
+        expected_output="A report of costs and vendors.",
         agent=researcher
     )
     
@@ -82,14 +86,8 @@ def run_global_ai(data, directive):
         context=[t1]
     )
 
-    # ✅ THE FIX: max_rpm is moved here to the Crew level
-    # This paces the entire operation to stay under your 10 RPM Google limit
-    crew = Crew(
-        agents=[researcher, planner], 
-        tasks=[t1, t2], 
-        max_rpm=2, 
-        memory=False
-    )
+    # memory=False is critical to avoid hidden OpenAI embedding calls
+    crew = Crew(agents=[researcher, planner], tasks=[t1, t2], memory=False)
     return str(crew.kickoff())
 
 # ==================== USER INTERFACE ====================
@@ -105,10 +103,10 @@ if page == "Dashboard":
     conn.close()
     
     if df.empty:
-        st.info("No projects yet.")
+        st.info("No projects yet. Go to 'New Global Project' to start.")
     else:
         st.dataframe(df, use_container_width=True)
-        selected_name = st.selectbox("Select Project", df['name'])
+        selected_name = st.selectbox("Select Project to View", df['name'])
         selected_id = df[df['name'] == selected_name]['id'].values[0]
         
         if st.button("📊 Open Intelligence Report"):
@@ -118,22 +116,25 @@ if page == "Dashboard":
             conn.close()
             st.write(f"### Crew Manifest: {selected_name}")
             st.table(crew_df)
+            st.write("### AI Strategic Strategy & Risk Report")
             st.info(proj_data[0])
 
 elif page == "New Global Project":
     st.subheader("➕ Create a New Production")
     with st.form("creation_form"):
-        name = st.text_input("Project Name")
-        loc = st.text_input("Location")
+        name = st.text_input("Project Name (e.g., Iceland March Shoot)")
+        loc = st.text_input("Location (e.g., Reykjavík, Iceland)")
         ptype = st.selectbox("Type", ["Commercial", "Documentary", "Feature Film"])
         budget = st.number_input("Budget (€)", value=30000)
-        directive = st.text_area("Directive")
+        directive = st.text_area("Detailed Instructions")
         
         if st.form_submit_button("🚀 Launch AI Production Team"):
             p_id = str(uuid.uuid4())[:8]
             with st.status("🧠 Agents coordinating...") as status:
                 try:
                     result = run_global_ai({'location': loc, 'type': ptype, 'budget': budget}, directive)
+                    
+                    # Robust JSON Extraction
                     match = re.search(r'\{.*\}', result, re.DOTALL)
                     if match:
                         clean_data = json.loads(match.group())
