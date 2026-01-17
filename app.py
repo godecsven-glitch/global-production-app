@@ -1,9 +1,8 @@
 import os
 
-# 🛡️ THE SAFETY SWITCHES (Critical for Streamlit Cloud stability)
+# 🛡️ THE SAFETY SWITCHES
 os.environ["OTEL_SDK_DISABLED"] = "true"
 os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
-os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
 
 import streamlit as st
 import sqlite3
@@ -18,21 +17,22 @@ from crewai_tools import SerperDevTool
 st.set_page_config(page_title="Sovereign Global AI", layout="wide", page_icon="👑")
 
 try:
-    GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
-    SERPER_API_KEY = st.secrets["SERPER_API_KEY"]
+    # 🔑 Dual-Key Safety: We set both so the Native SDK is happy
+    K = st.secrets["GOOGLE_API_KEY"]
+    os.environ["GOOGLE_API_KEY"] = K
+    os.environ["GEMINI_API_KEY"] = K 
+    os.environ["SERPER_API_KEY"] = st.secrets["SERPER_API_KEY"]
 except KeyError:
-    st.error("⚠️ API Keys Missing: Add them to Streamlit Secrets.")
+    st.error("⚠️ API Keys Missing in Secrets.")
     st.stop()
 
-os.environ["SERPER_API_KEY"] = SERPER_API_KEY
-
-# 🌎 NATIVE GOOGLE CONNECTION
-# This uses your €240 credits natively with a speed buffer for your 10 RPM limit
+# 🌎 NATIVE CONNECTION ENGINE
+# We use the raw model ID 'gemini-1.5-flash' to stop the 400 error
 global_llm = LLM(
     model="gemini-1.5-flash", 
-    api_key=GOOGLE_API_KEY,
-    temperature=0.2,
-    max_rpm=8  # Forces agents to pace themselves to avoid 429 errors
+    api_key=os.environ["GEMINI_API_KEY"],
+    temperature=0.3,
+    max_rpm=5 # Paced even slower for the Ice Storm Test
 )
 
 # ==================== DATABASE ENGINE ====================
@@ -40,14 +40,10 @@ global_llm = LLM(
 def init_db():
     conn = sqlite3.connect('global_production.db')
     c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS projects 
-        (id TEXT PRIMARY KEY, name TEXT, location TEXT, type TEXT, budget REAL, plan TEXT)
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS crew 
-        (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT, role TEXT, name TEXT, rate REAL)
-    ''')
+    c.execute('''CREATE TABLE IF NOT EXISTS projects 
+                 (id TEXT PRIMARY KEY, name TEXT, location TEXT, type TEXT, budget REAL, plan TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS crew 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT, role TEXT, name TEXT, rate REAL)''')
     conn.commit()
     conn.close()
 
@@ -57,9 +53,9 @@ init_db()
 
 def run_global_ai(data, directive):
     researcher = Agent(
-        role="Local Production Scout",
-        goal=f"Research 2026 production specifics in {data['location']}",
-        backstory="Expert in local vendor pricing, weather logistics, and fixing.",
+        role="Local Scout",
+        goal=f"Research 2026 specifics in {data['location']}",
+        backstory="Expert in local vendor pricing and weather logistics.",
         tools=[SerperDevTool()],
         llm=global_llm,
         verbose=True,
@@ -68,20 +64,20 @@ def run_global_ai(data, directive):
     
     planner = Agent(
         role="Executive Producer",
-        goal="Finalize a JSON production budget and risk analysis",
-        backstory="Strategic lead focused on financial viability and weather risks.",
+        goal="Create a JSON budget and risk report",
+        backstory="Strategic lead focused on financial viability.",
         llm=global_llm,
         verbose=True
     )
 
     t1 = Task(
-        description=f"Research 2026 crew rates and gear in {data['location']} for: {directive}",
-        expected_output="A report of costs, vendors, and weather risks.",
+        description=f"Research 2026 rates and weather risks in {data['location']} for: {directive}",
+        expected_output="A report of costs and vendors.",
         agent=researcher
     )
     
     t2 = Task(
-        description="Transform research into a JSON plan. Use 'crew' (role, name, rate), 'equipment', and 'schedule' keys.",
+        description="Format as JSON. Keys: 'crew' (role, name, rate), 'equipment', 'schedule'.",
         expected_output="Return ONLY a JSON object.",
         agent=planner,
         context=[t1]
@@ -117,17 +113,17 @@ if page == "Dashboard":
             
             st.write(f"### Crew List: {selected_name}")
             st.table(crew_df)
-            st.write("### AI Strategic Strategy & Risk Report")
+            st.write("### AI Strategic Report")
             st.info(proj_data['plan'])
 
 elif page == "New Global Project":
     st.subheader("➕ Create a New Production")
     with st.form("creation_form"):
-        name = st.text_input("Project Name (e.g., Iceland Stress Test)")
-        loc = st.text_input("Location (e.g., Reykjavík, Iceland)")
+        name = st.text_input("Project Name")
+        loc = st.text_input("Location")
         ptype = st.selectbox("Type", ["Commercial", "Documentary", "Feature Film"])
         budget = st.number_input("Budget (€)", value=30000)
-        directive = st.text_area("Detailed Instructions", placeholder="Paste your Iceland Stress Test directive here...")
+        directive = st.text_area("Directive")
         
         if st.form_submit_button("🚀 Launch AI Production Team"):
             p_id = str(uuid.uuid4())[:8]
@@ -145,10 +141,10 @@ elif page == "New Global Project":
                                 c.execute("INSERT INTO crew (project_id, role, name, rate) VALUES (?,?,?,?)", 
                                          (p_id, person.get('role'), person.get('name'), person.get('rate', 0)))
                             conn.commit()
-                        status.update(label="✅ Stress Test Complete!", state="complete")
+                        status.update(label="✅ Success!", state="complete")
                         st.balloons()
                     else:
-                        st.error("AI returned results but failed to format them.")
+                        st.error("AI completed but data format was invalid.")
                         st.write(result)
                 except Exception as e:
                     st.error(f"Error: {e}")
