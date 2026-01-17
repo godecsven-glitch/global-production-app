@@ -1,9 +1,10 @@
 streamlit
 pandas
-crewai
+crewai[google-genai]
 crewai-tools
 google-generativeai
 litellm
 fpdf
+
 
 
