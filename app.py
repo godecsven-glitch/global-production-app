@@ -27,12 +27,12 @@ except KeyError:
 os.environ["SERPER_API_KEY"] = SERPER_API_KEY
 
 # 🌎 NATIVE GOOGLE CONNECTION
-# This uses your €240 credits natively with a speed governor of 8 RPM
+# This uses your €240 credits natively with a speed buffer for your 10 RPM limit
 global_llm = LLM(
     model="gemini-1.5-flash", 
     api_key=GOOGLE_API_KEY,
     temperature=0.2,
-    max_rpm=8
+    max_rpm=8  # Forces agents to pace themselves to avoid 429 errors
 )
 
 # ==================== DATABASE ENGINE ====================
