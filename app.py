@@ -1,5 +1,4 @@
 import os
-
 # 🛡️ THE SAFETY SWITCHES
 os.environ["OTEL_SDK_DISABLED"] = "true"
 os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
@@ -10,29 +9,27 @@ import json
 import re
 import uuid
 import pandas as pd
-from crewai import Agent, Task, Crew, LLM
+from crewai import Agent, Task, Crew
 from crewai_tools import SerperDevTool
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 # ==================== GLOBAL CONFIGURATION ====================
 st.set_page_config(page_title="Sovereign Global AI", layout="wide", page_icon="👑")
 
 try:
-    # 🔑 Dual-Key Safety: We set both so the Native SDK is happy
-    K = st.secrets["GOOGLE_API_KEY"]
-    os.environ["GOOGLE_API_KEY"] = K
-    os.environ["GEMINI_API_KEY"] = K 
+    API_KEY = st.secrets["GOOGLE_API_KEY"]
     os.environ["SERPER_API_KEY"] = st.secrets["SERPER_API_KEY"]
 except KeyError:
     st.error("⚠️ API Keys Missing in Secrets.")
     st.stop()
 
-# 🌎 NATIVE CONNECTION ENGINE
-# We use the raw model ID 'gemini-1.5-flash' to stop the 400 error
-global_llm = LLM(
-    model="gemini-1.5-flash", 
-    api_key=os.environ["GEMINI_API_KEY"],
+# 🌎 THE STABLE BRIDGE (LangChain Version)
+# This bypasses the ClientError 400 by using a more robust formatting engine
+global_llm = ChatGoogleGenerativeAI(
+    model="gemini-1.5-flash",
+    google_api_key=API_KEY,
     temperature=0.3,
-    max_rpm=5 # Paced even slower for the Ice Storm Test
+    max_output_tokens=2048
 )
 
 # ==================== DATABASE ENGINE ====================
@@ -59,7 +56,7 @@ def run_global_ai(data, directive):
         tools=[SerperDevTool()],
         llm=global_llm,
         verbose=True,
-        max_iter=3
+        allow_delegation=False
     )
     
     planner = Agent(
@@ -67,7 +64,8 @@ def run_global_ai(data, directive):
         goal="Create a JSON budget and risk report",
         backstory="Strategic lead focused on financial viability.",
         llm=global_llm,
-        verbose=True
+        verbose=True,
+        allow_delegation=False
     )
 
     t1 = Task(
@@ -111,7 +109,7 @@ if page == "Dashboard":
             proj_data = pd.read_sql_query("SELECT plan FROM projects WHERE id=?", conn, params=(selected_id,)).iloc[0]
             conn.close()
             
-            st.write(f"### Crew List: {selected_name}")
+            st.write(f"### Crew Manifest: {selected_name}")
             st.table(crew_df)
             st.write("### AI Strategic Report")
             st.info(proj_data['plan'])
