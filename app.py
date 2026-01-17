@@ -1,7 +1,13 @@
 import os
-# 🛡️ THE 2026 SAFETY SWITCHES
+
+# 🛡️ THE SAFETY SWITCHES
 os.environ["OTEL_SDK_DISABLED"] = "true"
 os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
+
+# 🔑 THE UNIVERSAL BYPASS
+# This stops CrewAI from asking for an OpenAI key during setup
+if "OPENAI_API_KEY" not in os.environ:
+    os.environ["OPENAI_API_KEY"] = "sk-bypass-key-not-needed"
 
 import streamlit as st
 import sqlite3
@@ -9,9 +15,8 @@ import json
 import re
 import uuid
 import pandas as pd
-from crewai import Agent, Task, Crew
+from crewai import Agent, Task, Crew, LLM
 from crewai_tools import SerperDevTool
-from langchain_google_genai import ChatGoogleGenerativeAI
 
 # ==================== GLOBAL CONFIGURATION ====================
 st.set_page_config(page_title="Sovereign Global AI", layout="wide", page_icon="👑")
@@ -20,16 +25,16 @@ try:
     API_KEY = st.secrets["GOOGLE_API_KEY"]
     os.environ["SERPER_API_KEY"] = st.secrets["SERPER_API_KEY"]
 except KeyError:
-    st.error("⚠️ API Keys Missing in Streamlit Secrets.")
+    st.error("⚠️ API Keys Missing in Secrets.")
     st.stop()
 
-# 🌎 THE 2026 STABLE ENGINE
-# We are using Gemini 3 Flash - the 2026 workhorse model.
-# This avoids the 404 error by using the stable production endpoint.
-global_llm = ChatGoogleGenerativeAI(
-    model="gemini-3-flash",
-    google_api_key=API_KEY,
-    temperature=0.3
+# 🌎 NATIVE GOOGLE ENGINE (2026 Stable)
+# Using direct Gemini 3 Flash to avoid 404 errors
+global_llm = LLM(
+    model="gemini-3-flash", 
+    api_key=API_KEY,
+    temperature=0.3,
+    max_rpm=5
 )
 
 # ==================== DATABASE ENGINE ====================
@@ -50,27 +55,25 @@ init_db()
 
 def run_global_ai(data, directive):
     researcher = Agent(
-        role="Global Scout",
-        goal=f"Research 2026 production specifics in {data['location']}",
-        backstory="Expert in local vendor pricing and weather logistics.",
+        role="Local Scout",
+        goal=f"Research costs in {data['location']}",
+        backstory="Local production expert.",
         tools=[SerperDevTool()],
         llm=global_llm,
-        verbose=True,
-        allow_delegation=False
+        verbose=True
     )
     
     planner = Agent(
         role="Executive Producer",
-        goal="Create a JSON budget and risk report",
-        backstory="Strategic lead focused on project viability.",
+        goal="Create a JSON budget report",
+        backstory="Strategic financial lead.",
         llm=global_llm,
-        verbose=True,
-        allow_delegation=False
+        verbose=True
     )
 
     t1 = Task(
-        description=f"Research 2026 rates and weather risks in {data['location']} for: {directive}",
-        expected_output="A report of costs and vendors.",
+        description=f"Research rates in {data['location']} for: {directive}",
+        expected_output="A list of local vendors and costs.",
         agent=researcher
     )
     
@@ -81,7 +84,8 @@ def run_global_ai(data, directive):
         context=[t1]
     )
 
-    crew = Crew(agents=[researcher, planner], tasks=[t1, t2])
+    # memory=False is critical to avoid hidden OpenAI embedding calls
+    crew = Crew(agents=[researcher, planner], tasks=[t1, t2], memory=False)
     return str(crew.kickoff())
 
 # ==================== USER INTERFACE ====================
@@ -108,20 +112,18 @@ if page == "Dashboard":
             crew_df = pd.read_sql_query("SELECT role, name, rate FROM crew WHERE project_id=?", conn, params=(selected_id,))
             proj_data = pd.read_sql_query("SELECT plan FROM projects WHERE id=?", conn, params=(selected_id,)).iloc[0]
             conn.close()
-            
-            st.write(f"### Crew List: {selected_name}")
+            st.write(f"### Crew Manifest: {selected_name}")
             st.table(crew_df)
-            st.write("### AI Strategic Strategy & Risk Report")
             st.info(proj_data[0])
 
 elif page == "New Global Project":
     st.subheader("➕ Create a New Production")
     with st.form("creation_form"):
-        name = st.text_input("Project Name (e.g., Iceland Stress Test)")
-        loc = st.text_input("Location (e.g., Reykjavík, Iceland)")
+        name = st.text_input("Project Name")
+        loc = st.text_input("Location")
         ptype = st.selectbox("Type", ["Commercial", "Documentary", "Feature Film"])
         budget = st.number_input("Budget (€)", value=30000)
-        directive = st.text_area("Detailed Instructions")
+        directive = st.text_area("Directive")
         
         if st.form_submit_button("🚀 Launch AI Production Team"):
             p_id = str(uuid.uuid4())[:8]
@@ -141,7 +143,7 @@ elif page == "New Global Project":
                         status.update(label="✅ Success!", state="complete")
                         st.balloons()
                     else:
-                        st.error("AI completed but data format was invalid.")
+                        st.error("AI results received but formatting was invalid.")
                         st.write(result)
                 except Exception as e:
                     st.error(f"Error: {e}")
