@@ -1,5 +1,5 @@
 import os
-# 🛡️ THE SAFETY SWITCHES
+# 🛡️ THE 2026 SAFETY SWITCHES
 os.environ["OTEL_SDK_DISABLED"] = "true"
 os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
 
@@ -23,13 +23,13 @@ except KeyError:
     st.error("⚠️ API Keys Missing in Streamlit Secrets.")
     st.stop()
 
-# 🌎 THE STABLE v1 BRIDGE
-# We explicitly target the stable v1 API to avoid the v1beta 404 error
+# 🌎 THE 2026 STABLE ENGINE
+# We are using Gemini 3 Flash - the 2026 workhorse model.
+# This avoids the 404 error by using the stable production endpoint.
 global_llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-flash",
+    model="gemini-3-flash",
     google_api_key=API_KEY,
-    temperature=0.3,
-    convert_system_message_to_human=True # Required for some Gemini versions
+    temperature=0.3
 )
 
 # ==================== DATABASE ENGINE ====================
@@ -49,11 +49,10 @@ init_db()
 # ==================== AI AGENT LOGIC ====================
 
 def run_global_ai(data, directive):
-    # Reduced complexity to ensure the 404 error doesn't hide other issues
     researcher = Agent(
-        role="Local Scout",
-        goal=f"Research 2026 costs in {data['location']}",
-        backstory="Local production expert.",
+        role="Global Scout",
+        goal=f"Research 2026 production specifics in {data['location']}",
+        backstory="Expert in local vendor pricing and weather logistics.",
         tools=[SerperDevTool()],
         llm=global_llm,
         verbose=True,
@@ -62,21 +61,21 @@ def run_global_ai(data, directive):
     
     planner = Agent(
         role="Executive Producer",
-        goal="Create a JSON budget report",
-        backstory="Strategic financial lead.",
+        goal="Create a JSON budget and risk report",
+        backstory="Strategic lead focused on project viability.",
         llm=global_llm,
         verbose=True,
         allow_delegation=False
     )
 
     t1 = Task(
-        description=f"Research 2026 rates in {data['location']} for: {directive}",
-        expected_output="A list of local vendors and costs.",
+        description=f"Research 2026 rates and weather risks in {data['location']} for: {directive}",
+        expected_output="A report of costs and vendors.",
         agent=researcher
     )
     
     t2 = Task(
-        description="Format as JSON. Keys: 'crew' (role, name, rate), 'equipment', 'schedule'.",
+        description="Format as JSON. Use keys: 'crew' (role, name, rate), 'equipment', 'schedule'.",
         expected_output="Return ONLY a JSON object.",
         agent=planner,
         context=[t1]
@@ -98,7 +97,7 @@ if page == "Dashboard":
     conn.close()
     
     if df.empty:
-        st.info("No projects found.")
+        st.info("No projects yet.")
     else:
         st.dataframe(df, use_container_width=True)
         selected_name = st.selectbox("Select Project", df['name'])
@@ -109,18 +108,20 @@ if page == "Dashboard":
             crew_df = pd.read_sql_query("SELECT role, name, rate FROM crew WHERE project_id=?", conn, params=(selected_id,))
             proj_data = pd.read_sql_query("SELECT plan FROM projects WHERE id=?", conn, params=(selected_id,)).iloc[0]
             conn.close()
-            st.write(f"### Crew Manifest: {selected_name}")
+            
+            st.write(f"### Crew List: {selected_name}")
             st.table(crew_df)
+            st.write("### AI Strategic Strategy & Risk Report")
             st.info(proj_data[0])
 
 elif page == "New Global Project":
     st.subheader("➕ Create a New Production")
     with st.form("creation_form"):
-        name = st.text_input("Project Name")
-        loc = st.text_input("Location")
+        name = st.text_input("Project Name (e.g., Iceland Stress Test)")
+        loc = st.text_input("Location (e.g., Reykjavík, Iceland)")
         ptype = st.selectbox("Type", ["Commercial", "Documentary", "Feature Film"])
         budget = st.number_input("Budget (€)", value=30000)
-        directive = st.text_area("Directive")
+        directive = st.text_area("Detailed Instructions")
         
         if st.form_submit_button("🚀 Launch AI Production Team"):
             p_id = str(uuid.uuid4())[:8]
@@ -140,7 +141,7 @@ elif page == "New Global Project":
                         status.update(label="✅ Success!", state="complete")
                         st.balloons()
                     else:
-                        st.error("AI results received but formatting was invalid.")
+                        st.error("AI completed but data format was invalid.")
                         st.write(result)
                 except Exception as e:
                     st.error(f"Error: {e}")
