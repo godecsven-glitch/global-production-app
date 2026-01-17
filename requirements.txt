@@ -1,10 +1,12 @@
 streamlit
 pandas
-crewai[google-genai]
+crewai
 crewai-tools
+langchain-google-genai
 google-generativeai
 litellm
-fpdf
+pysqlite3-binary
+
 
 
 
